@@ -77,15 +77,54 @@ float fCapsule(vec3 p, float r, float c , vec3 capsulePosition) {
 	return mix(length(p.xz) - r, length(vec3(p.x, abs(p.y) - c, p.z)) - r, step(c, abs(p.y)));
 }
 
-float map_the_world(vec3 p)
+float fCylinder(vec3 p, float r, float height) {
+	float d = length(p.xz) - r;
+	d = max(d, abs(p.y) - height);
+	return d;
+}
+
+float IntersectSDF(float dist1 , float dist2)
+{
+    return max(dist1,dist2);
+}
+
+float UnionSDF(float dist1 , float dist2)
+{
+    return min(dist1,dist2);
+}
+
+float DifferenceSDF(float dist1 , float dist2)
+{
+    return max(dist1,-dist2);
+}
+
+vec4 map_the_world(vec3 p)
 {
     float displacement = sin(5.0f * p.x) * sin(5.0f * p.y) * sin(5.0f * p.z) * 0.25;
     float sphere0 = distance_from_sphere(p,vec3(0.0f),1.0f);
     float plane0 = fPlane(p,vec3(0.0f,1.0f,0.0f),1.0f);
-    float Capsule0 = fCapsule(p,1.0f,1.0f , vec3(-3.0f,1.0f,0.0f));
-    float Box0 = fBox(p , vec3(1.0f),vec3(-7.0f,0.0f,0.0f));
+    float Capsule0 = fCapsule(p,0.8f,1.0f , vec3(-3.0f,1.0f,0.0f));
+    float Box0 = fBox(p , vec3(1.0f),vec3(-3,0.0f,0.0f));
 
-    return min(min(plane0 ,min(Box0 , Capsule0)),sphere0 + displacement);
+    float Cylinder0 = fCylinder(p * inverse(rotateX(degreesToRadians(90))) - vec3(-3,0.0f,0.0f) ,0.8f,1.5f);
+
+
+    float finalObject = DifferenceSDF(Box0,Capsule0);
+    finalObject = DifferenceSDF(finalObject,Cylinder0);
+
+    float OutObject = min(min(plane0 ,finalObject),sphere0);
+    vec3 ObjectColor = vec3(1.0f,0.0f,1.0f);
+
+    if(OutObject >= finalObject)
+    {
+        ObjectColor = vec3(217/255.0f,113/255.0f,168/255.0f);
+    }
+    else if(OutObject >= sphere0)
+    {
+        ObjectColor = vec3(255/255.0f,223/255.0f,13/255.0f);
+    }
+
+    return vec4(OutObject,ObjectColor);
 
 }
 
@@ -93,9 +132,9 @@ vec3 calculate_normal(vec3 p)
 {
     const vec3 small_step = vec3(0.001f,0.0f,0.0f);
 
-    float gradient_x = map_the_world(p+small_step.xyy) - map_the_world(p-small_step.xyy);
-    float gradient_y = map_the_world(p+small_step.yxy) - map_the_world(p-small_step.yxy);
-    float gradient_z = map_the_world(p+small_step.yyx) - map_the_world(p-small_step.yyx);
+    float gradient_x = map_the_world(p+small_step.xyy).x - map_the_world(p-small_step.xyy).x;
+    float gradient_y = map_the_world(p+small_step.yxy).x - map_the_world(p-small_step.yxy).x;
+    float gradient_z = map_the_world(p+small_step.yyx).x - map_the_world(p-small_step.yyx).x;
 
     vec3 normal = vec3(gradient_x,gradient_y,gradient_z);
     return normalize(normal);
@@ -137,12 +176,13 @@ vec3 Get_Shading(vec3 current_position,vec3 ro , vec3 rd ,vec3 ObjectColor)
     for (int j = 0; j < NUMBER_OF_SHADOW_STEPS; ++j)
     {
         vec3 shadow_ray_position = shadow_ray_origin + float(j) * SHADOW_STEP_SIZE * shadow_ray_direction;
-        float shadow_distance = map_the_world(shadow_ray_position);
+        vec4 map = map_the_world(shadow_ray_position);
+        float shadow_distance = map.x;
 
         
         if (shadow_distance < MINIMUM_SHADOW_HIT_DISTANCE)
         {
-            shadow = 0.3;
+            shadow = 0.5;
             break; 
         }
     }
@@ -168,11 +208,13 @@ vec3 ray_march(vec3 ro , vec3 rd , vec3 ObjectColor)
     for (int i = 0; i < NUMBER_OF_STEPS; ++i)
     {
         vec3 current_position = ro + total_distance_traveled * rd;
-        float distance_to_closest = map_the_world(current_position);
+        vec4 map = map_the_world(current_position);
+        float distance_to_closest = map.x;
 
         if(distance_to_closest < MINIMUM_HIT_DISTANCE)
         {
-            return Get_Shading(current_position,ro,rd,ObjectColor);
+          
+            return Get_Shading(current_position,ro,rd,map.yzw);
         }
         if(total_distance_traveled > MAXIMUM_TRACE_DISTANCE)
         {
