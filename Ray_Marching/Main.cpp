@@ -15,6 +15,8 @@ int main()
 {
 	float width = 900;
 	float height = 900;
+	
+	SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
 	InitWindow(width, height, "Ray Marching");
 
 	if (!IsWindowReady())
@@ -30,12 +32,20 @@ int main()
 		CloseWindow();
 		return -1;
 	}
+
+	float MonitorWidth = GetMonitorWidth(GetCurrentMonitor());
+	float MonitorHeight = GetMonitorHeight(GetCurrentMonitor());
+
 	SetWindowState(FLAG_WINDOW_RESIZABLE);
 	SetTargetFPS(144);
-	glViewport(0, 0, width, height);
+	glViewport(0, 0, MonitorWidth, MonitorHeight);
+
+	glEnable(GL_MULTISAMPLE);
 
 	std::unique_ptr<Util::Shader> RayMarchingShader = std::make_unique<Util::Shader>("RayMarching.vs", "RayMarching.fs");
-	
+	RenderTexture2D ViewPortFBO = LoadRenderTexture(MonitorWidth, MonitorHeight);
+	SetTextureFilter(ViewPortFBO.texture, TEXTURE_FILTER_BILINEAR);
+
 	GLuint vbo, vao;
 
 	glGenVertexArrays(1, &vao);
@@ -68,17 +78,40 @@ int main()
 	glm::vec3 cameraPos(0.0f);
 	float speed = 4.0f;
 	float FpsTextScale = 18.0f;
-
 	float timevar = 0;
+	float scale = 0;
+	float CameraSensitivity = 20.0f;
+
+	bool CameraMode = true;
+	bool AllowCaptureEnter = true;
+
+	Vec2<float> CameraRadian({ 0,0 });
+
+	LOG_INF("PRESS ENTER TO TURN OFF THE CAMERA MODE");
 
 	while (!WindowShouldClose())
 	{
+		if (IsWindowMaximized())
+		{
+			scale = MIN((float)GetScreenWidth() / ViewPortFBO.depth.width, ((float)GetScreenHeight() + (ViewPortFBO.depth.height - GetScreenHeight())) / ViewPortFBO.depth.height);
+		}
+		if (IsWindowFullscreen())
+		{
+			scale = MIN((float)GetScreenWidth() / ViewPortFBO.depth.width, ((float)GetScreenHeight() + (ViewPortFBO.depth.height - GetScreenHeight())) / ViewPortFBO.depth.height);
+		}
+		else
+		{
+			scale = MIN((float)GetScreenWidth() / MonitorWidth, ((float)GetScreenHeight()) / MonitorHeight);
+		}
+
+		BeginTextureMode(ViewPortFBO);
+
 		glClear(GL_COLOR_BUFFER_BIT);
 		glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
 
-		BeginDrawing();
+		DrawText((std::to_string(GetFPS()) + " FPS").c_str(), MonitorWidth * 0.01f, MonitorHeight * 0.01f, FpsTextScale, WHITE);
+		DrawText(("CAMERA MODE: " + std::to_string(CameraMode)).c_str(), MonitorWidth * 0.91f, MonitorHeight * 0.01f, FpsTextScale, WHITE);
 
-		DrawText((std::to_string(GetFPS()) + " FPS").c_str(), GetScreenWidth() * 0.01f, GetScreenHeight() * 0.01f, FpsTextScale, WHITE);
 
 		glUseProgram(RayMarchingShader->GetID());
 		glBindVertexArray(vao);
@@ -92,6 +125,16 @@ int main()
 		else if (IsKeyReleased(KEY_LEFT_SHIFT))
 		{
 			speed = 4.0f;
+		}
+
+		if ((IsKeyPressed(KEY_ENTER) || IsKeyDown(KEY_ENTER)) && AllowCaptureEnter)
+		{
+			CameraMode = !CameraMode;
+			AllowCaptureEnter = false;
+		}
+		if (IsKeyReleased(KEY_ENTER))
+		{
+			AllowCaptureEnter = true;
 		}
 
 		if (IsKeyPressed(KEY_W) || IsKeyDown(KEY_W))
@@ -119,16 +162,47 @@ int main()
 		{
 			cameraPos.y -= speed * dt;
 		}
-		
-		glUniform2f(glGetUniformLocation(RayMarchingShader->GetID(), "WindowSize"), GetScreenWidth(), GetScreenHeight());
+
+		glUniform2f(glGetUniformLocation(RayMarchingShader->GetID(), "WindowSize"), MonitorWidth,MonitorHeight);
 		glUniform2f(glGetUniformLocation(RayMarchingShader->GetID(), "MousePos"), GetMouseX(), GetMouseY());
 		glUniform3f(glGetUniformLocation(RayMarchingShader->GetID(), "cameraPos"), cameraPos.x, cameraPos.y, cameraPos.z);
 		glUniform1f(glGetUniformLocation(RayMarchingShader->GetID(), "time"), timevar);
+		glUniform1f(glGetUniformLocation(RayMarchingShader->GetID(), "scaleCoeff"), (width / height) / (MonitorWidth / MonitorHeight));
+		glUniform2f(glGetUniformLocation(RayMarchingShader->GetID(), "cameraRadian"), CameraRadian.x, CameraRadian.y);
+
+		float aspect_ratio_hw = (float)MonitorWidth / MonitorHeight;
+		float aspect_ratio_wh = (float)MonitorHeight / MonitorWidth;
+
+		glm::mat4 ImageScaleRatioMat(1.0f);
+		ImageScaleRatioMat = glm::scale(ImageScaleRatioMat, glm::vec3(aspect_ratio_wh, 1.0f, 1.0f));
+
+		glUniformMatrix4fv(glGetUniformLocation(RayMarchingShader->GetID(), "modelMat"), 1, GL_FALSE, glm::value_ptr(ImageScaleRatioMat));
 
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 
 		glBindVertexArray(0);
 		glUseProgram(0);
+
+		EndTextureMode();
+
+		BeginDrawing();
+
+		glClear(GL_COLOR_BUFFER_BIT);
+		glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+
+		if (IsWindowMaximized())
+		{
+			DrawTexturePro(ViewPortFBO.texture, { 0.0f, 0.0f, (float)ViewPortFBO.texture.width, (float)-ViewPortFBO.texture.height }, { (GetScreenWidth() - ((float)GetMonitorWidth(GetCurrentMonitor()) * scale)) * 0.5f - (ViewPortFBO.depth.height - GetScreenHeight()), (GetScreenHeight() - ((float)GetMonitorHeight(GetCurrentMonitor()) * scale)) * 0.5f,(float)GetMonitorWidth(GetCurrentMonitor()) * scale + (2 * (ViewPortFBO.depth.height - GetScreenHeight())), (float)GetMonitorHeight(GetCurrentMonitor()) * scale }, { 0, 0 }, 0.0f, WHITE);
+		}
+		else if (IsWindowFullscreen())
+		{
+			DrawTexturePro(ViewPortFBO.texture, { 0.0f, 0.0f, (float)ViewPortFBO.texture.width, (float)-ViewPortFBO.texture.height }, { (GetScreenWidth() - ((float)GetMonitorWidth(GetCurrentMonitor()) * scale)) * 0.5f, (GetScreenHeight() - ((float)GetMonitorHeight(GetCurrentMonitor()) * scale)) * 0.5f,(float)GetMonitorWidth(GetCurrentMonitor()) * scale, (float)GetMonitorHeight(GetCurrentMonitor()) * scale + (ViewPortFBO.depth.height - GetScreenHeight()) }, { 0, 0 }, 0.0f, WHITE);
+		}
+		else if (!IsWindowMaximized() && !IsWindowFullscreen())
+		{
+			DrawTexturePro(ViewPortFBO.texture, { 0.0f, 0.0f, (float)ViewPortFBO.texture.width, (float)-ViewPortFBO.texture.height }, { (GetScreenWidth() - ((float)GetMonitorWidth(GetCurrentMonitor()) * scale)) * 0.5f, (GetScreenHeight() - ((float)GetMonitorHeight(GetCurrentMonitor()) * scale)) * 0.5f,(float)GetMonitorWidth(GetCurrentMonitor()) * scale, (float)GetMonitorHeight(GetCurrentMonitor()) * scale }, { 0, 0 }, 0.0f, WHITE);
+		}
+		
 		EndDrawing();
 
 		timevar += 1.0f * dt;
@@ -137,11 +211,35 @@ int main()
 		{
 			timevar = 0.0f;
 		}
+
+		if (CameraMode)
+		{
+			HideCursor();
+			Vec2<float> mouseDelta({ GetMouseDelta().x * dt ,GetMouseDelta().y * dt });
+			CameraRadian(CameraRadian + (mouseDelta * CameraSensitivity));
+
+			if (abs(glm::radians(CameraRadian.x)) >= 6.28318531)
+			{
+				CameraRadian.x = 0;
+			}
+			if (abs(glm::radians(CameraRadian.y)) >= 6.28318531)
+			{
+				CameraRadian.y = 0;
+			}
+
+			SetMousePosition(GetScreenWidth() / 2, GetScreenHeight() / 2);
+
+		}
+		else
+		{
+			ShowCursor();
+		}
 	}
 
 	glDeleteBuffers(1, &vbo);
 	glDeleteVertexArrays(1, &vao);
 	glDeleteProgram(RayMarchingShader->GetID());
+	UnloadRenderTexture(ViewPortFBO);
 
 	LOG_INF("All resources are terminated!");
 	CloseWindow();

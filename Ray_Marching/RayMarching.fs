@@ -6,6 +6,10 @@ uniform vec2 WindowSize;
 uniform vec2 MousePos;
 uniform vec3 cameraPos;
 uniform float time;
+uniform float scaleCoeff;
+uniform vec2 cameraRadian;
+
+uniform mat4 modelMat;
 
 out vec4 FragColor;
 
@@ -140,6 +144,7 @@ vec3 calculate_normal(vec3 p)
     return normalize(normal);
 }
 
+
 vec3 Get_Shading(vec3 current_position,vec3 ro , vec3 rd ,vec3 ObjectColor)
 {
     vec3 normal = calculate_normal(current_position);
@@ -179,7 +184,6 @@ vec3 Get_Shading(vec3 current_position,vec3 ro , vec3 rd ,vec3 ObjectColor)
         vec4 map = map_the_world(shadow_ray_position);
         float shadow_distance = map.x;
 
-        
         if (shadow_distance < MINIMUM_SHADOW_HIT_DISTANCE)
         {
             shadow = 0.5;
@@ -213,7 +217,6 @@ vec3 ray_march(vec3 ro , vec3 rd , vec3 ObjectColor)
 
         if(distance_to_closest < MINIMUM_HIT_DISTANCE)
         {
-          
             return Get_Shading(current_position,ro,rd,map.yzw);
         }
         if(total_distance_traveled > MAXIMUM_TRACE_DISTANCE)
@@ -232,9 +235,10 @@ vec3 ray_march(vec3 ro , vec3 rd , vec3 ObjectColor)
 void main()
 {
     vec2 uv = (gl_FragCoord.xy / WindowSize) * 2.0f - 1.0f;
+    uv.y *= scaleCoeff; 
     vec3 camera_position = vec3(0.0f,0.0f,-5.0f);
     
-    mat3 directionMat = rotateX(degreesToRadians(MousePos.y / 10)) * rotateY(degreesToRadians(MousePos.x / 5)) * rotateZ(0.0);
+    mat3 directionMat = rotateX(degreesToRadians(cameraRadian.y)) * rotateY(degreesToRadians(cameraRadian.x)) * rotateZ(0.0);
     vec3 ro = camera_position + (cameraPos * directionMat);
     vec3 rd = normalize(vec3(uv, 1.0f) * directionMat);
 
